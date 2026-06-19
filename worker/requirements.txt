@@ -1,0 +1,4 @@
+# Installed on top of the nerfstudio base image (which already provides torch, COLMAP,
+# tinycudann, and the ns-* CLIs).
+runpod>=1.6
+requests>=2.31

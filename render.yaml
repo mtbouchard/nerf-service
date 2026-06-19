@@ -1,0 +1,33 @@
+# Render Blueprint for the API service. New > Blueprint, point at this repo.
+# The GPU worker is NOT deployed here - it runs on RunPod (see worker/README.md).
+services:
+  - type: web
+    name: nerf-service
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /healthz
+    autoDeploy: true
+    envVars:
+      - key: PYTHON_VERSION
+        value: "3.12.6"
+      # "local" = CPU stand-in demo (works with zero extra config).
+      # "runpod" = real GPU pipeline; then set the secrets below.
+      - key: NERF_BACKEND
+        value: "local"
+      - key: CORS_ALLOW_ORIGINS
+        value: "*"
+      # --- Only needed when NERF_BACKEND=runpod (set as secrets in the dashboard) ---
+      - key: RUNPOD_API_KEY
+        sync: false
+      - key: RUNPOD_ENDPOINT_ID
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
