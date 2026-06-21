@@ -7,8 +7,9 @@ WORKDIR /srv
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
-COPY app ./app
+COPY app.py solution_app.py pipeline.py ./
 
 EXPOSE 8000
 ENV PORT=8000
-CMD ["sh", "-c", "uvicorn app.main:app --host 0.0.0.0 --port ${PORT}"]
+ENV APP_MODULE=solution_app
+CMD ["sh", "-c", "uvicorn ${APP_MODULE}:app --host 0.0.0.0 --port ${PORT}"]

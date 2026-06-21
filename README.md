@@ -1,21 +1,15 @@
 # nerf-service
 
-Upload a series of photos, reconstruct a **3D Gaussian-splat** with a real NeRF pipeline
-(**COLMAP + nerfstudio**) on a GPU, then download the `.ply`. Same upload → `202` → poll →
-download job contract as `stitch-service`, but the heavy compute is offloaded to a **RunPod
-GPU worker**, with files exchanged through S3-compatible storage.
+Upload a series of photos, reconstruct a 3D point cloud, then download the `.ply`. This is
+the **long-job sibling** of `stitch-service`: a NeRF reconstruction takes minutes, so instead
+of returning the result inline it uses the **`202 + poll`** job pattern.
 
-> Same async-job API as the interview problem, scaled up to a genuine GPU workload. A CPU
-> "local" backend ships in the box so the whole thing runs and tests without any GPU/cloud.
+A CPU **stand-in pipeline** ships in the box, so the whole API runs, tests, and deploys with
+no GPU and no cloud. The real GPU reconstruction (**COLMAP + nerfstudio**) lives in
+[`worker/`](./worker) and runs on RunPod — wiring that up is phase 2.
 
-## Two backends (one env var)
-
-| `NERF_BACKEND` | Compute | Needs | Use |
-|---|---|---|---|
-| `local` (default) | CPU stand-in → real `.ply` point cloud, in-process | nothing | dev, tests, Render demo |
-| `runpod` | real COLMAP + nerfstudio on a GPU | RunPod endpoint + S3/R2 | production |
-
-The API code is identical; only `app/backends/get_backend()` differs.
+> Same async-job API as the interview problem, scaled up to a minutes-long workload that
+> returns immediately and is polled to completion.
 
 ## API
 
@@ -23,75 +17,81 @@ The API code is identical; only `app/backends/get_backend()` differs.
 POST /upload          multipart "file"          -> {"id": "..."}      (repeat per frame)
 POST /nerfify         {"images": [id1, ...]}    -> 202 {"job_id": "...", "status": "pending"}
 GET  /jobs/{job_id}                             -> {"job_id":..,"status":"pending|running|done|failed"}
-GET  /jobs/{job_id}/result                      -> the .ply splat (302 redirect to a presigned URL in runpod mode)
+GET  /jobs/{job_id}/result                      -> the .ply file (409 until done)
 GET  /healthz                                   -> {"status":"ok","backend":"local"}
 ```
 
-## Architecture (runpod mode)
+## How it works (local backend)
 
 ```
-client ──upload──▶ API ──put──▶ S3/R2 (uploads/<id>.jpg)
-client ──nerfify─▶ API ──presign GET urls + PUT url──▶ RunPod /run ──▶ GPU worker
-                                                          worker: download frames
-                                                                  COLMAP (poses)
-                                                                  nerfstudio splatfacto (train)
-                                                                  export gaussian-splat .ply
-                                                                  PUT result ──▶ S3/R2 (results/<job>.ply)
-client ──poll────▶ API ──▶ RunPod /status/<id>
-client ──result──▶ API ──302──▶ presigned GET (results/<job>.ply)
+client ──upload──▶ API ──save──▶ data/uploads/<id>.jpg          (once per frame)
+client ──nerfify─▶ API: create Job(pending), background_tasks.add_task(run_job) ─▶ 202 {job_id}
+                       run_job: status=running -> pipeline.generate_pointcloud_ply() -> status=done
+client ──poll────▶ API ──▶ GET /jobs/<id>          (pending -> running -> done)
+client ──result──▶ API ──▶ FileResponse(data/results/<job>.ply)
 ```
 
-The worker holds **no credentials** — the API hands it presigned GET/PUT URLs.
+`/nerfify` returns **immediately** after scheduling a FastAPI `BackgroundTask`; the heavy work
+runs in the background while the client polls `/jobs/{id}`. Contrast with `stitch-service`,
+where a seconds-long job is awaited and the image is returned in the same response.
 
-## Run locally (CPU stand-in)
+`pipeline.py` is the compute stand-in (the analog of stitch-service's `stitch.py`) — it writes
+a real ASCII `.ply` colored point cloud from the frames. Set `LOCAL_DELAY_SECONDS` to make
+jobs take long enough that you actually watch them poll.
+
+## Run locally
 
 ```bash
 cd nerf-service
-pip install -r requirements-dev.txt          # or: uv run pip install -r requirements-dev.txt
-uvicorn app.main:app --reload                 # NERF_BACKEND defaults to local
+pip install -r requirements-dev.txt
 
+LOCAL_DELAY_SECONDS=2 uvicorn solution_app:app --reload     # working reference (visibly polls)
 # end-to-end demo (new terminal): uploads client/sample_frames/ -> downloads client/scene.ply
 SERVER_URL=http://127.0.0.1:8000 python client/client.py
 ```
 
+There's a learning **assignment**: implement the four endpoints yourself in `app.py`
+(then run with `uvicorn app:app`).
+
 ## Tests
 
 ```bash
-PYTHONPATH=. pytest      # local backend, all green
+KATA_TARGET=solution_app pytest    # reference: all green
+pytest                             # your implementation (app.py)
 ```
 
-## Going real (GPU)
+## Deploy to Render
 
-1. **Build & deploy the worker** to RunPod Serverless — see [`worker/README.md`](./worker/README.md).
-2. **Create an S3/R2 bucket** (Cloudflare R2 recommended) and an access key pair.
-3. **Deploy the API** to Render via `render.yaml`, then set these env vars (secrets):
-   `NERF_BACKEND=runpod`, `RUNPOD_API_KEY`, `RUNPOD_ENDPOINT_ID`, `S3_BUCKET`,
-   `S3_ENDPOINT_URL`, `S3_ACCESS_KEY_ID`, `S3_SECRET_ACCESS_KEY`.
-4. Point the client at the deployed URL with **real overlapping photos** of one object
-   (20–60 frames): `SERVER_URL=https://nerf-service.onrender.com python client/client.py path/to/photos`.
+Connected via `render.yaml` (Blueprint): build `pip install -r requirements.txt`, start
+`uvicorn $APP_MODULE:app --host 0.0.0.0 --port $PORT`, health check `/healthz`. Ships with
+`APP_MODULE=solution_app` so it's green immediately; set `APP_MODULE=app` once you've
+implemented `app.py`. The CPU stand-in needs no extra config.
 
-See the top-level `DEPLOY_GUIDE.md` for the full GitHub + Render + RunPod + domain walkthrough.
+> Free-tier caveats apply (cold start, ephemeral disk) — fine for a demo. In-memory job store
+> means jobs don't survive a restart; a real system uses Redis + object storage.
 
-## What's verified vs what needs your GPU
-- **Verified locally**: the entire API, job lifecycle, validation, the client, and a real
-  `.ply` artifact (via the CPU backend).
-- **Needs your accounts**: the GPU reconstruction itself (RunPod) and the S3/R2 file
-  exchange. That code is written and documented but can't run on a CPU-only laptop —
-  COLMAP/nerfstudio need CUDA. The `runpod` backend is a thin, well-typed RunPod + presigned-URL client.
+## Phase 2 — the real GPU pipeline (planned)
+
+The CPU backend proves out the entire API + job + poll + download contract. To make it a
+*real* NeRF:
+1. Build & deploy [`worker/`](./worker/README.md) (COLMAP + nerfstudio) to RunPod Serverless.
+2. Create an S3/R2 bucket for exchanging frames + results via presigned URLs.
+3. Add a `runpod` code path to the API that submits to RunPod and hands back the result.
+
+The worker holds **no credentials** — the API gives it presigned GET/PUT URLs. (The API-side
+RunPod wiring isn't in `app.py` yet; that's the phase-2 task.)
 
 ## Layout
 
 ```
 nerf-service/
-  app/                     # CPU API (deploys to Render)
-    main.py config.py models.py store.py storage.py
-    local_pipeline.py      # CPU stand-in -> real .ply
-    backends/              # base.py, local_backend.py, runpod_backend.py, get_backend()
-    routers/               # health.py, jobs.py
-  worker/                  # GPU container for RunPod
+  app.py               # ← the whole API + the assignment (you implement the 4 endpoints)
+  solution_app.py      # complete single-file reference
+  pipeline.py          # CPU stand-in compute -> real .ply (analog of stitch.py)
+  worker/              # real GPU pipeline for RunPod (phase 2)
     handler.py nerf_pipeline.py Dockerfile requirements.txt README.md
-  client/                  # upload series -> nerfify -> poll -> download splat
+  client/              # upload series -> nerfify -> poll -> download splat
     client.py sample_frames/
-  tests/                   # local-backend acceptance tests
-  Dockerfile render.yaml requirements*.txt
+  tests/               # local-backend acceptance tests
+  Dockerfile render.yaml requirements*.txt pytest.ini
 ```

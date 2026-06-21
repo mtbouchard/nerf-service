@@ -2,10 +2,10 @@
 nerf-service client - upload a series of frames -> /nerfify -> poll -> download the splat.
 
 Local (CPU stand-in backend):
-    uv run uvicorn app.main:app --reload
+    uvicorn solution_app:app --reload          # or: uvicorn app:app (your code)
     SERVER_URL=http://127.0.0.1:8000 python client/client.py
 
-Deployed (GPU on RunPod):
+Deployed:
     SERVER_URL=https://nerf-service.onrender.com python client/client.py
 
 Uploads every image in client/sample_frames/ (or pass a directory as argv[1]).
