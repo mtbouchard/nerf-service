@@ -16,7 +16,9 @@ FROM ghcr.io/nerfstudio-project/nerfstudio:latest
 WORKDIR /worker
 
 COPY worker/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Use `python3 -m pip` (not bare `pip`): the nerfstudio base installs as a non-root user,
+# so the pip console script isn't on PATH in a RUN shell (bare `pip` -> exit 127).
+RUN python3 -m pip install --no-cache-dir -r requirements.txt
 
 COPY worker/nerf_pipeline.py worker/handler.py ./
 
@@ -24,4 +26,4 @@ COPY worker/nerf_pipeline.py worker/handler.py ./
 ENV NERF_ITERATIONS=7000
 
 # RunPod Serverless invokes the handler; it blocks waiting for jobs.
-CMD ["python", "-u", "handler.py"]
+CMD ["python3", "-u", "handler.py"]
