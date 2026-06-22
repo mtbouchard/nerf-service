@@ -26,17 +26,22 @@ the resulting `splat.ply` to `result_put_url`. It needs **no** cloud credentials
 
 ## Build & deploy
 
+Easiest: let RunPod build from GitHub (no local Docker/CUDA needed). RunPod →
+Serverless → **New Endpoint** → **Import Git Repository** → select this repo, then:
+- Branch: `main`
+- **Dockerfile Path:** `worker/Dockerfile` (build context is the repo root)
+- GPU: a 16–24 GB card (e.g. RTX A4000/A5000/3090) is plenty for splatfacto.
+- (Optional) env `NERF_ITERATIONS` to trade quality vs cost.
+
+Or build + push manually from the repo root (needs a CUDA build host):
+
 ```bash
-docker build -t <dockerhub-user>/nerf-worker:latest worker/
+docker build -f worker/Dockerfile -t <dockerhub-user>/nerf-worker:latest .
 docker push  <dockerhub-user>/nerf-worker:latest
 ```
 
-Then in RunPod → Serverless → New Endpoint:
-- Container image: `<dockerhub-user>/nerf-worker:latest`
-- GPU: a 16–24 GB card (e.g. RTX A4000/A5000/3090) is plenty for splatfacto.
-- (Optional) env `NERF_ITERATIONS` to trade quality vs cost.
-- Copy the **Endpoint ID** and a RunPod **API key** into the API's env
-  (`RUNPOD_ENDPOINT_ID`, `RUNPOD_API_KEY`).
+Then copy the **Endpoint ID** and a RunPod **API key** into the API's env
+(`RUNPOD_ENDPOINT_ID`, `RUNPOD_API_KEY`).
 
 ## Notes
 - Needs **real overlapping photos** of one object/scene (20–60 frames, good coverage). COLMAP
