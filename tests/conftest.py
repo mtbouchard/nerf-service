@@ -1,8 +1,8 @@
-"""Tests run against the local (CPU stand-in) backend - no GPU/cloud required.
+"""Tests run against the local CPU pipeline - no GPU/cloud required.
 
-KATA_TARGET picks which module to test (default: app.py, your code):
-    pytest                          # tests YOUR app.py
-    KATA_TARGET=solution_app pytest # tests the reference (should be all green)
+APP_MODULE picks which module to test (default: app):
+    pytest                          # tests app.py
+    APP_MODULE=solution_app pytest  # tests the reference implementation
 """
 import importlib
 import io
@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
 
-target = importlib.import_module(os.environ.get("KATA_TARGET", "app"))
+target = importlib.import_module(os.environ.get("APP_MODULE", "app"))
 
 
 @pytest.fixture()

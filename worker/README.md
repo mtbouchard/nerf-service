@@ -41,6 +41,15 @@ Then in RunPod → Serverless → New Endpoint:
 ## Notes
 - Needs **real overlapping photos** of one object/scene (20–60 frames, good coverage). COLMAP
   will fail to register synthetic/gradient images — those only work with the local CPU
-  stand-in backend.
+  pipeline.
 - Build this image on a machine with the CUDA toolchain (or RunPod's image builder); it
   won't build on a CPU-only laptop because of the CUDA extensions.
+
+## Test data (known-good smoke test)
+Before trusting the COLMAP path on real photos, validate the trainer on the standard NeRF
+**Blender "lego" scene** (`nerf_synthetic`). It ships with camera poses in
+`transforms_*.json`, so use nerfstudio's **blender** dataparser (`ns-train ... blender-data`)
+and **skip COLMAP** — synthetic, transparent-background renders don't register in COLMAP.
+Train on `train/`; the `test/` poses are held-out novel views for evaluating the result.
+Keep the dataset outside the repo (it's large). This is a deterministic GPU-pipeline smoke
+test, separate from the real-photo capture flow.

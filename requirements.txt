@@ -2,3 +2,7 @@ fastapi>=0.115
 uvicorn[standard]>=0.34
 python-multipart>=0.0.20
 pillow>=10.4
+# Used only when NERF_BACKEND=runpod (RunPod calls + S3/R2). Imported lazily, so local
+# mode never touches them; installed here so you can switch modes via env var alone.
+httpx>=0.27
+boto3>=1.34

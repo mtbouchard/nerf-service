@@ -1,11 +1,10 @@
 """
-CPU stand-in for the GPU NeRF pipeline (the analog of stitch-service's stitch.py).
+CPU pipeline: build a colored point cloud from the uploaded frames.
 
-It does NOT reconstruct geometry. It samples colors from the uploaded frames and lays them
-out as a colored point cloud wrapped on a cylinder, then writes a valid ASCII .ply. The
-point is to exercise the whole upload -> job -> poll -> download contract end to end with a
-real 3D file artifact, with no GPU and no cloud. The real reconstruction (COLMAP +
-nerfstudio) lives in worker/ and runs on RunPod.
+It samples colors from each frame and lays them out wrapped on a cylinder, then writes a
+valid ASCII .ply. This runs the whole upload -> job -> poll -> download flow with a real 3D
+artifact, no GPU and no cloud. The GPU reconstruction (COLMAP + nerfstudio) lives in worker/
+and runs on RunPod.
 
 Set LOCAL_DELAY_SECONDS (seconds) to make jobs take long enough that the client visibly polls.
 """
@@ -20,7 +19,7 @@ LOCAL_DELAY_SECONDS = float(os.environ.get("LOCAL_DELAY_SECONDS", "0"))
 
 def generate_pointcloud_ply(image_paths: list[str], out_path: str) -> None:
     if LOCAL_DELAY_SECONDS:
-        time.sleep(LOCAL_DELAY_SECONDS)  # stand in for minutes-long GPU compute
+        time.sleep(LOCAL_DELAY_SECONDS)  # simulate minutes-long GPU compute
 
     grid = 48  # sample grid per image
     n = max(1, len(image_paths))

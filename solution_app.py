@@ -1,9 +1,8 @@
 """
-nerf-service — complete single-file reference (the fallback).
+nerf-service — reference implementation (equivalent to app.py).
 
-Identical scaffolding to app.py, but the four endpoints are implemented. Run it any time:
     uvicorn solution_app:app --reload
-    KATA_TARGET=solution_app pytest        # all green
+    APP_MODULE=solution_app pytest        # all green
 
 The long-job pattern: /nerfify returns 202 immediately after scheduling a BackgroundTask;
 the client polls /jobs/{id} until "done", then downloads /jobs/{id}/result.

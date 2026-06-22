@@ -18,6 +18,15 @@ services:
       - key: APP_MODULE
         value: "solution_app"
       - key: NERF_BACKEND
-        value: "local"
+        value: "local"   # set to "runpod" + add the secrets below to use the GPU worker
       - key: CORS_ALLOW_ORIGINS
         value: "*"
+      # --- RunPod GPU backend: add these in the Render dashboard (Environment) when you
+      # --- flip NERF_BACKEND to "runpod". Kept out of the blueprint so they stay secret.
+      # - key: RUNPOD_API_KEY        # sync: false
+      # - key: RUNPOD_ENDPOINT_ID    # sync: false
+      # - key: S3_BUCKET
+      # - key: S3_ENDPOINT_URL       # R2 endpoint; omit for real AWS S3
+      # - key: S3_REGION             # "auto" for R2
+      # - key: S3_ACCESS_KEY_ID      # sync: false
+      # - key: S3_SECRET_ACCESS_KEY  # sync: false

@@ -1,8 +1,8 @@
 """
 nerf-service client - upload a series of frames -> /nerfify -> poll -> download the splat.
 
-Local (CPU stand-in backend):
-    uvicorn solution_app:app --reload          # or: uvicorn app:app (your code)
+Local:
+    uvicorn solution_app:app --reload          # or: uvicorn app:app
     SERVER_URL=http://127.0.0.1:8000 python client/client.py
 
 Deployed:
