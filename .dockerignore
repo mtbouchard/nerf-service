@@ -3,10 +3,11 @@ __pycache__/
 .pytest_cache/
 .venv/
 venv/
+# NOTE: the only image we build is the GPU worker (worker/Dockerfile), and RunPod's
+# GitHub builder uses the repo root as the build context — so do NOT ignore worker/.
 .env
 data/
 tests/
 client/
-worker/
 .git/
 .DS_Store
