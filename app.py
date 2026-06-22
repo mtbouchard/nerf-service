@@ -48,6 +48,7 @@ MIN_FRAMES = 3              # a NeRF needs several overlapping views
 MAX_FRAMES = 80
 MAX_UPLOAD_BYTES = 25 * 1024 * 1024
 RESULT_FORMAT = "ply"
+SAMPLE_RESULT_KEY = os.environ.get("SAMPLE_RESULT_KEY", "samples/fern.ply")  # runpod-mode demo result
 
 UPLOADS_DIR.mkdir(parents=True, exist_ok=True)
 RESULTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -236,8 +237,24 @@ def get_result(job_id: str):
 
 
 
+@app.get("/sample", include_in_schema=False)
+def sample():
+    """Redirect to a presigned download of a pre-baked example result (runpod mode)."""
+    if BACKEND != "runpod":
+        raise HTTPException(status_code=404, detail="no sample available in this mode")
+    import storage
+    return RedirectResponse(url=storage.presign_get(SAMPLE_RESULT_KEY))
+
+
 @app.get("/", response_class=HTMLResponse, include_in_schema=False)
 def landing():
+    sample_block = (
+        '<li><a href="/sample">Download a sample result</a> (a real splat from 20 photos) — '
+        'then drag the <code>.ply</code> into a viewer like '
+        '<a href="https://antimatter15.com/splat/">antimatter15.com/splat</a> or '
+        '<a href="https://superspl.at/editor">SuperSplat</a></li>'
+        if BACKEND == "runpod" else ""
+    )
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>{app.title}</title>
 <style>
@@ -246,15 +263,27 @@ def landing():
   code, pre {{ background:#f0f0f3; padding:2px 6px; border-radius:4px; }}
   a {{ color:#7c3aed; }} .pill {{ background:#ede9fe; color:#6d28d9; padding:2px 10px;
        border-radius:999px; font-size:13px; }}
+  h2 {{ margin-top:32px; }}
 </style></head>
 <body>
   <h1>{app.title} <span class="pill">backend: {BACKEND}</span></h1>
-  <p>Upload a series of overlapping photos, start a NeRF job, poll it, then download a 3D
-     point cloud (<code>.{RESULT_FORMAT}</code>). Minutes-long work, so it's 202 + poll.</p>
+  <p>A small service that turns a set of overlapping photos into a 3D scene. You upload
+     frames, it runs structure-from-motion + Gaussian-splatting on a GPU worker, and returns
+     a <code>.{RESULT_FORMAT}</code>. The job takes minutes, so the API is asynchronous:
+     <strong>submit &rarr; poll &rarr; download</strong> (HTTP 202 + polling).</p>
+
+  <h2>Try it</h2>
   <ul>
-    <li><a href="/docs">Interactive API docs (/docs)</a></li>
+    <li><a href="/docs">Open the interactive API docs (/docs)</a> — drive the whole flow from
+        your browser: <code>/upload</code> a few overlapping photos, <code>/nerfify</code>,
+        poll <code>/jobs/&lt;id&gt;</code>, then <code>/jobs/&lt;id&gt;/result</code>.</li>
+    {sample_block}
+    <li>Source (FastAPI API + RunPod GPU worker + client):
+        <a href="https://github.com/mtbouchard/nerf-service">github.com/mtbouchard/nerf-service</a></li>
     <li><a href="/healthz">Health check (/healthz)</a></li>
   </ul>
+
+  <h2>API</h2>
   <pre><code>POST /upload          multipart "file"          -> {{"id": "..."}}   (repeat per frame)
 POST /nerfify         {{"images": [id1, ...]}}    -> 202 {{"job_id": "...", "status": "pending"}}
 GET  /jobs/&lt;job_id&gt;                              -> {{"status": "running", ...}}
