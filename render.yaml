@@ -6,27 +6,32 @@ services:
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    # $APP_MODULE picks which file to serve: solution_app (working reference) or app (yours).
-    # Switch the env var below to "app" once you've implemented app.py.
+    # $APP_MODULE picks which file to serve: app (yours) or solution_app (reference).
     startCommand: uvicorn $APP_MODULE:app --host 0.0.0.0 --port $PORT
     healthCheckPath: /healthz
     autoDeploy: true
     envVars:
       - key: PYTHON_VERSION
         value: "3.12.6"
-      # Serve the complete reference until you've implemented app.py, then change to "app".
       - key: APP_MODULE
-        value: "solution_app"
+        value: "app"
       - key: NERF_BACKEND
-        value: "local"   # set to "runpod" + add the secrets below to use the GPU worker
+        value: "runpod"
       - key: CORS_ALLOW_ORIGINS
         value: "*"
-      # --- RunPod GPU backend: add these in the Render dashboard (Environment) when you
-      # --- flip NERF_BACKEND to "runpod". Kept out of the blueprint so they stay secret.
-      # - key: RUNPOD_API_KEY        # sync: false
-      # - key: RUNPOD_ENDPOINT_ID    # sync: false
-      # - key: S3_BUCKET
-      # - key: S3_ENDPOINT_URL       # R2 endpoint; omit for real AWS S3
-      # - key: S3_REGION             # "auto" for R2
-      # - key: S3_ACCESS_KEY_ID      # sync: false
-      # - key: S3_SECRET_ACCESS_KEY  # sync: false
+      - key: S3_REGION
+        value: "auto"            # "auto" for Cloudflare R2
+      # Secrets: sync:false means Render prompts for the value in the dashboard and
+      # never stores it in this (committed) file.
+      - key: RUNPOD_API_KEY
+        sync: false
+      - key: RUNPOD_ENDPOINT_ID
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ENDPOINT_URL
+        sync: false              # R2 endpoint (contains your account id)
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
