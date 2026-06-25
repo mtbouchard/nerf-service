@@ -2,16 +2,15 @@
 import io
 
 from tests.conftest import make_jpeg
+from tests.workflow_helpers import run_upload_to_ply_workflow, upload_frame, upload_n_frames
 
 
 def upload(client, color=(120, 80, 200)):
-    return client.post(
-        "/upload", files={"file": ("f.jpg", make_jpeg(color), "image/jpeg")}
-    )
+    return upload_frame(client, color=color)
 
 
 def upload_n(client, n):
-    return [upload(client, (60 + i * 20, 80, 200)).json()["id"] for i in range(n)]
+    return upload_n_frames(client, n)
 
 
 def test_health(client):
@@ -32,23 +31,9 @@ def test_upload_rejects_non_image(client):
 
 
 def test_nerfify_happy_path(client):
-    ids = upload_n(client, 5)
-    res = client.post("/nerfify", json={"images": ids})
-    assert res.status_code == 202
-    job_id = res.json()["job_id"]
-    assert res.json()["status"] == "pending"
-
-    # Local backend: BackgroundTasks finishes before POST returns under TestClient.
-    status_res = client.get(f"/jobs/{job_id}")
-    assert status_res.status_code == 200
-    assert status_res.json()["status"] == "done"
-    assert status_res.json()["result_format"] == "ply"
-
-    result = client.get(f"/jobs/{job_id}/result")
-    assert result.status_code == 200
-    body = result.content
-    assert body.startswith(b"ply\n")  # a real .ply header
-    assert b"element vertex" in body
+    _, ply_bytes = run_upload_to_ply_workflow(client, n_frames=5)
+    assert ply_bytes.startswith(b"ply\n")
+    assert b"element vertex" in ply_bytes
 
 
 def test_nerfify_too_few_frames(client):
