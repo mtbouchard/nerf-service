@@ -8,7 +8,10 @@ and polling status until a fully navigable 3D world URL is ready.
 The user must provide their World Labs platform key via the WLT_API_KEY env var.
 """
 import os
+import uuid
 from typing import Any
+
+import httpx
 
 # Global configurations
 WLT_API_BASE = "https://api.worldlabs.ai"
@@ -51,14 +54,42 @@ def upload_image(fileobj: Any, file_name: str) -> str:
     if not WLT_API_KEY:
         raise ValueError("WLT_API_KEY environment variable is not configured.")
 
-    # TODO: Implement step 1 & 2 (POST to prepare_upload)
-    # Hint: Use httpx.post with json payload and headers
+    ext = file_name.split(".")[-1].lower() if "." in file_name else "jpg"
+    if ext not in ("jpg", "jpeg", "png", "webp"):
+        ext = "jpg"
 
-    # TODO: Implement step 3 (PUT binary file contents to the signed upload_url)
-    # Hint: fileobj.read() gets the bytes. Use httpx.put with headers=upload_info["required_headers"]
+    prepare_url = f"{WLT_API_BASE}/marble/v1/media-assets:prepare_upload"
+    payload = {
+        "file_name": file_name,
+        "kind": "image",
+        "extension": ext,
+    }
+    headers = {
+        "WLT-Api-Key": WLT_API_KEY,
+        "Content-Type": "application/json",
+    }
 
-    # TODO: Return the media_asset["id"]
-    raise NotImplementedError("TODO: Implement upload_image")
+    resp = httpx.post(prepare_url, json=payload, headers=headers, timeout=30.0)
+    resp.raise_for_status()
+    data = resp.json()
+
+    asset_id = data["media_asset"]["id"]
+    upload_url = data["upload_info"]["upload_url"]
+    required_headers = data["upload_info"].get("required_headers", {})
+
+    fileobj.seek(0)
+    file_bytes = fileobj.read()
+
+    put_headers = {**required_headers}
+    if "Content-Type" not in put_headers and ext in ("jpg", "jpeg"):
+        put_headers["Content-Type"] = "image/jpeg"
+    elif "Content-Type" not in put_headers and ext == "png":
+        put_headers["Content-Type"] = "image/png"
+
+    put_resp = httpx.put(upload_url, headers=put_headers, content=file_bytes, timeout=60.0)
+    put_resp.raise_for_status()
+
+    return asset_id
 
 
 def submit(asset_ids: list[str]) -> str:
@@ -98,13 +129,35 @@ def submit(asset_ids: list[str]) -> str:
     if not WLT_API_KEY:
         raise ValueError("WLT_API_KEY environment variable is not configured.")
 
-    # TODO: Calculate azimuths and build the multi_image_prompt payload list
-    # Hint: loop over enumerate(asset_ids) and calculate int(i * 360 / len(asset_ids))
+    multi_image_prompt = []
+    n = len(asset_ids)
+    for i, asset_id in enumerate(asset_ids):
+        azimuth = int(i * 360 / n)
+        multi_image_prompt.append({
+            "azimuth": azimuth,
+            "content": {
+                "source": "media_asset",
+                "media_asset_id": asset_id,
+            },
+        })
 
-    # TODO: Construct the full JSON payload matching the WorldsGenerateRequest spec
+    payload = {
+        "display_name": f"World {uuid.uuid4().hex[:6]}",
+        "model": WLT_MODEL,
+        "world_prompt": {
+            "type": "multi-image",
+            "multi_image_prompt": multi_image_prompt,
+        },
+    }
+    headers = {
+        "WLT-Api-Key": WLT_API_KEY,
+        "Content-Type": "application/json",
+    }
 
-    # TODO: POST to /marble/v1/worlds:generate and return operation_id
-    raise NotImplementedError("TODO: Implement submit")
+    generate_url = f"{WLT_API_BASE}/marble/v1/worlds:generate"
+    resp = httpx.post(generate_url, json=payload, headers=headers, timeout=30.0)
+    resp.raise_for_status()
+    return resp.json()["operation_id"]
 
 
 def fetch_status(operation_id: str) -> tuple[str, str | None, str | None]:
@@ -134,11 +187,29 @@ def fetch_status(operation_id: str) -> tuple[str, str | None, str | None]:
     if not WLT_API_KEY:
         raise ValueError("WLT_API_KEY environment variable is not configured.")
 
-    # TODO: GET the operation status from /marble/v1/operations/{operation_id}
+    status_url = f"{WLT_API_BASE}/marble/v1/operations/{operation_id}"
+    headers = {"WLT-Api-Key": WLT_API_KEY}
 
-    # TODO: Implement done=False mapping
-    # Hint: If not done, read metadata["progress"]["status"] to determine if "pending" or "running"
+    resp = httpx.get(status_url, headers=headers, timeout=30.0)
+    resp.raise_for_status()
+    data = resp.json()
 
-    # TODO: Implement done=True success/error handling
-    # Hint: If done, check if "error" field is set. Otherwise, grab response["world_marble_url"]
-    raise NotImplementedError("TODO: Implement fetch_status")
+    if not data.get("done", False):
+        metadata = data.get("metadata") or {}
+        progress = metadata.get("progress") or {}
+        status_str = progress.get("status", "IN_PROGRESS")
+        if status_str == "IN_QUEUE":
+            return "pending", None, None
+        return "running", None, None
+
+    error = data.get("error")
+    if error:
+        err_msg = error.get("message") if isinstance(error, dict) else str(error)
+        return "failed", err_msg, None
+
+    response_data = data.get("response") or {}
+    world_url = response_data.get("world_marble_url")
+    if not world_url:
+        return "failed", "Operation completed but world_marble_url is missing.", None
+
+    return "done", None, world_url
