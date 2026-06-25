@@ -90,6 +90,8 @@ class Job(BaseModel):
     result_path: str | None = None       # local mode: path to the .ply on disk
     runpod_id: str | None = None         # runpod mode: RunPod's job id (for polling)
     result_key: str | None = None        # runpod mode: the S3/R2 key of the result
+    operation_id: str | None = None      # worldlabs mode: World API operation id (for polling)
+    world_url: str | None = None         # worldlabs mode: navigable Marble world URL when done
     error: str | None = None
 
 
@@ -137,9 +139,14 @@ def healthz():
     if BACKEND == "runpod":
         import runpod_client
         missing = runpod_client.required_config()
-        if missing:
-            body["status"] = "degraded"
-            body["missing_config"] = missing
+    elif BACKEND == "worldlabs":
+        import worldlabs_backend
+        missing = worldlabs_backend.required_config()
+    else:
+        missing = []
+    if missing:
+        body["status"] = "degraded"
+        body["missing_config"] = missing
     return body
 
 
@@ -178,6 +185,10 @@ async def upload_file(file: UploadFile = File(...)):
         key = f"uploads/{image_id}.jpg"
         storage.upload_fileobj(file.file, key, "image/jpeg")
         uploads[image_id] = key  # runpod mode: uploads[] holds the S3/R2 key, not a path
+    elif BACKEND == "worldlabs":
+        import worldlabs_backend
+        asset_id = worldlabs_backend.upload_image(file.file, f"{image_id}.jpg")
+        uploads[image_id] = asset_id  # worldlabs mode: uploads[] holds a World Labs media_asset_id
     else:
         path = os.path.join(UPLOADS_DIR, f"{image_id}.jpg")
         with open(path, "wb") as f:
@@ -200,6 +211,9 @@ def nerfify(req: NerfifyRequest, background_tasks: BackgroundTasks):
         import runpod_client
         job.runpod_id = runpod_client.submit(job_id, [uploads[i] for i in req.images])
         job.result_key = runpod_client.result_key(job_id)
+    elif BACKEND == "worldlabs":
+        import worldlabs_backend
+        job.operation_id = worldlabs_backend.submit([uploads[i] for i in req.images])
     else:
         background_tasks.add_task(run_job, job_id)
     return JobCreatedResponse(job_id=job_id, status=JobStatus.PENDING)
@@ -209,17 +223,27 @@ def get_job(job_id: str):
     if job_id not in jobs:
         raise HTTPException(status_code=404, detail="job not found")
     job= jobs[job_id]
-    if BACKEND == "runpod" and job.runpod_id and job.status not in (JobStatus.DONE, JobStatus.FAILED):
+    terminal = (JobStatus.DONE, JobStatus.FAILED)
+    if BACKEND == "runpod" and job.runpod_id and job.status not in terminal:
         import runpod_client
         state, error = runpod_client.fetch_status(job.runpod_id)
         job.status = JobStatus(state)
         if error:
             job.error = error
+    elif BACKEND == "worldlabs" and job.operation_id and job.status not in terminal:
+        import worldlabs_backend
+        state, error, world_url = worldlabs_backend.fetch_status(job.operation_id)
+        job.status = JobStatus(state)
+        if error:
+            job.error = error
+        if world_url:
+            job.world_url = world_url
+    fmt = "world" if BACKEND == "worldlabs" else RESULT_FORMAT
     return JobStatusResponse(
         job_id=job.id, 
         status=job.status, 
         error=job.error, 
-        result_format=RESULT_FORMAT if job.status == JobStatus.DONE else None)
+        result_format=fmt if job.status == JobStatus.DONE else None)
 
 @app.get("/jobs/{job_id}/result")
 def get_result(job_id: str):
@@ -231,10 +255,210 @@ def get_result(job_id: str):
     if BACKEND == "runpod":
         import runpod_client
         return RedirectResponse(url=runpod_client.presign_result_get(job_id))
+    if BACKEND == "worldlabs":
+        if job.world_url is None:
+            raise HTTPException(status_code=500, detail="world url unavailable")
+        return RedirectResponse(url=job.world_url)
     if job.result_path is None:
         raise HTTPException(status_code=500, detail="job failed")
     return FileResponse(job.result_path, media_type="application/octet-stream")
 
+
+
+@app.get("/viewer", response_class=HTMLResponse, include_in_schema=False)
+def viewer(url: str):
+    """Serve a lightweight, mobile-responsive WebGL 3D Gaussian Splat viewer."""
+    return """<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>SplatCapture 3D Viewer</title>
+    <style>
+        body, html {
+            margin: 0;
+            padding: 0;
+            overflow: hidden;
+            width: 100%;
+            height: 100%;
+            background-color: #0d0e14;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            color: #ffffff;
+        }
+        #canvas {
+            width: 100%;
+            height: 100%;
+            display: block;
+        }
+        #loader {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            text-align: center;
+            pointer-events: none;
+            transition: opacity 0.5s ease;
+            z-index: 10;
+        }
+        .spinner {
+            border: 3px solid rgba(255, 255, 255, 0.1);
+            width: 40px;
+            height: 400px;
+            width: 48px;
+            height: 48px;
+            border-radius: 50%;
+            border-left-color: #7c3aed;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 16px auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .progress-text {
+            color: #a78bfa;
+            font-size: 15px;
+            font-weight: 500;
+            letter-spacing: 0.05em;
+        }
+        #error-msg {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.4);
+            padding: 24px;
+            border-radius: 16px;
+            text-align: center;
+            max-width: 80%;
+            display: none;
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            z-index: 20;
+        }
+        #error-msg h3 {
+            margin-top: 0;
+            color: #ef4444;
+        }
+        #error-msg p {
+            color: #cbd5e1;
+            font-size: 14px;
+            line-height: 1.5;
+            margin-bottom: 0;
+        }
+    </style>
+</head>
+<body>
+    <div id="loader">
+        <div class="spinner"></div>
+        <div id="progress" class="progress-text">Loading 3D Splat... 0%</div>
+    </div>
+    <div id="error-msg">
+        <h3>Viewer Error</h3>
+        <p id="error-text">An error occurred while fetching or rendering the 3D model.</p>
+    </div>
+    <canvas id="canvas"></canvas>
+
+    <script type="module">
+        import * as SPLAT from "https://cdn.jsdelivr.net/npm/gsplat@1.2.3";
+
+        const canvas = document.getElementById("canvas");
+        const loader = document.getElementById("loader");
+        const progressEl = document.getElementById("progress");
+        const errorEl = document.getElementById("error-msg");
+        const errorTextEl = document.getElementById("error-text");
+
+        function showError(text) {
+            loader.style.opacity = "0";
+            setTimeout(() => { loader.style.display = "none"; }, 500);
+            errorTextEl.textContent = text;
+            errorEl.style.display = "block";
+        }
+
+        async function main() {
+            const urlParams = new URLSearchParams(window.location.search);
+            const plyUrl = urlParams.get('url');
+
+            if (!plyUrl) {
+                showError("No 'url' parameter provided in the viewer request query.");
+                return;
+            }
+
+            try {
+                const renderer = new SPLAT.WebGLRenderer(canvas);
+                const scene = new SPLAT.Scene();
+                const camera = new SPLAT.Camera();
+                const controls = new SPLAT.OrbitControls(camera, canvas);
+
+                // Set default camera positioning for splats
+                camera.position.z = -3;
+                camera.position.y = 0.5;
+
+                progressEl.textContent = "Fetching 3D Splat...";
+                
+                const response = await fetch(plyUrl);
+                if (!response.ok) {
+                    throw new Error(`Splat fetch failed: Server returned ${response.status}`);
+                }
+
+                const contentLength = response.headers.get('content-length');
+                let totalBytes = contentLength ? parseInt(contentLength, 10) : 0;
+                
+                let loadedBytes = 0;
+                const reader = response.body.getReader();
+                const chunks = [];
+                
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    chunks.push(value);
+                    loadedBytes += value.length;
+                    if (totalBytes > 0) {
+                        const progress = Math.min(Math.round((loadedBytes / totalBytes) * 100), 99);
+                        progressEl.textContent = `Downloading... ${progress}%`;
+                    } else {
+                        progressEl.textContent = `Downloading... ${(loadedBytes / (1024 * 1024)).toFixed(1)}MB`;
+                    }
+                }
+
+                progressEl.textContent = "Processing 3D Data...";
+                const blob = new Blob(chunks, { type: "application/octet-stream" });
+
+                await SPLAT.PLYLoader.LoadFromFileAsync(blob, scene, (progress) => {
+                    const p = Math.round(progress * 100);
+                    progressEl.textContent = `Building Splats... ${p}%`;
+                });
+
+                loader.style.opacity = "0";
+                setTimeout(() => {
+                    loader.style.display = "none";
+                }, 500);
+
+                const handleResize = () => {
+                    renderer.setSize(window.innerWidth, window.innerHeight);
+                };
+
+                const frame = () => {
+                    controls.update();
+                    renderer.render(scene, camera);
+                    requestAnimationFrame(frame);
+                };
+
+                handleResize();
+                window.addEventListener("resize", handleResize);
+                requestAnimationFrame(frame);
+
+            } catch (err) {
+                console.error(err);
+                showError(err.message || "An error occurred while loading or initializing the 3D scene.");
+            }
+        }
+
+        main();
+    </script>
+</body>
+</html>"""
 
 
 @app.get("/sample", include_in_schema=False)
@@ -255,6 +479,14 @@ def landing():
         '<a href="https://superspl.at/editor">SuperSplat</a></li>'
         if BACKEND == "runpod" else ""
     )
+    if BACKEND == "worldlabs":
+        compute_desc = ("it sends the frames to the <a href=\"https://www.worldlabs.ai\">World "
+                        "Labs</a> World API, which generates a fully navigable 3D world")
+        result_desc = "redirect to the explorable Marble world"
+    else:
+        compute_desc = ("it runs structure-from-motion + Gaussian-splatting on a GPU worker, and "
+                        f"returns a <code>.{RESULT_FORMAT}</code>")
+        result_desc = f"the .{RESULT_FORMAT} file"
     return f"""<!doctype html>
 <html><head><meta charset="utf-8"><title>{app.title}</title>
 <style>
@@ -268,8 +500,7 @@ def landing():
 <body>
   <h1>{app.title} <span class="pill">backend: {BACKEND}</span></h1>
   <p>A small service that turns a set of overlapping photos into a 3D scene. You upload
-     frames, it runs structure-from-motion + Gaussian-splatting on a GPU worker, and returns
-     a <code>.{RESULT_FORMAT}</code>. The job takes minutes, so the API is asynchronous:
+     frames, {compute_desc}. The job takes minutes, so the API is asynchronous:
      <strong>submit &rarr; poll &rarr; download</strong> (HTTP 202 + polling).</p>
 
   <h2>Try it</h2>
@@ -287,5 +518,5 @@ def landing():
   <pre><code>POST /upload          multipart "file"          -> {{"id": "..."}}   (repeat per frame)
 POST /nerfify         {{"images": [id1, ...]}}    -> 202 {{"job_id": "...", "status": "pending"}}
 GET  /jobs/&lt;job_id&gt;                              -> {{"status": "running", ...}}
-GET  /jobs/&lt;job_id&gt;/result                       -> the .{RESULT_FORMAT} file</code></pre>
+GET  /jobs/&lt;job_id&gt;/result                       -> {result_desc}</code></pre>
 </body></html>"""
