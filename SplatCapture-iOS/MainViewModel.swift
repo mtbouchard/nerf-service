@@ -64,6 +64,47 @@ class MainViewModel: ObservableObject {
             stagedImages.append(IdentifiableImage(image: image))
         }
     }
+
+    /// Replace the staging area with synthetic frames so the full upload -> reconstruct flow
+    /// can be exercised without a camera (e.g. in the Simulator). These are for testing the
+    /// pipeline/UI, not for producing a high-quality reconstruction.
+    func loadSampleFrames(count: Int = 12) {
+        stagedImages.removeAll()
+        for i in 0..<count {
+            if let image = Self.makeSampleFrame(index: i, total: count) {
+                addImage(image)
+            }
+        }
+    }
+
+    private static func makeSampleFrame(index: Int, total: Int) -> UIImage? {
+        let size = CGSize(width: 512, height: 512)
+        let renderer = UIGraphicsImageRenderer(size: size)
+        return renderer.image { ctx in
+            let cg = ctx.cgContext
+            let fraction = CGFloat(index) / CGFloat(max(total, 1))
+
+            // Background hue shifts per frame so each upload is visually distinct.
+            UIColor(hue: fraction, saturation: 0.45, brightness: 0.92, alpha: 1.0).setFill()
+            cg.fill(CGRect(origin: .zero, size: size))
+
+            // A "subject" that orbits the center to mimic parallax between viewpoints.
+            let angle = fraction * 2 * .pi
+            let cx = size.width / 2 + cos(angle) * 120
+            let cy = size.height / 2 + sin(angle) * 120
+            UIColor.white.setFill()
+            cg.fillEllipse(in: CGRect(x: cx - 50, y: cy - 50, width: 100, height: 100))
+            UIColor.black.withAlphaComponent(0.7).setStroke()
+            cg.setLineWidth(4)
+            cg.strokeEllipse(in: CGRect(x: cx - 50, y: cy - 50, width: 100, height: 100))
+
+            let label = "frame \(index + 1)/\(total)" as NSString
+            label.draw(at: CGPoint(x: 18, y: 18), withAttributes: [
+                .font: UIFont.boldSystemFont(ofSize: 30),
+                .foregroundColor: UIColor.black,
+            ])
+        }
+    }
     
     func removeImage(withId id: UUID) {
         stagedImages.removeAll { $0.id == id }

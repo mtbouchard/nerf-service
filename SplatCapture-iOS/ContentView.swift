@@ -8,6 +8,7 @@ struct ContentView: View {
     @State private var showReviewGrid = false
     @State private var showSettings = false
     @State private var showShareSheet = false
+    @State private var showPhotoPicker = false
     
     // Aesthetic color scheme
     let darkBackground = Color(red: 13/255, green: 14/255, blue: 20/255)
@@ -79,6 +80,14 @@ struct ContentView: View {
                                 .font(.title3)
                                 .foregroundColor(.white)
                         }
+
+                        // Import frames from the photo library (works in the Simulator too).
+                        Button(action: { showPhotoPicker = true }) {
+                            Image(systemName: "photo.on.rectangle")
+                                .font(.title3)
+                                .foregroundColor(.white)
+                        }
+                        .padding(.leading, 16)
                         
                         Spacer()
                         
@@ -315,6 +324,13 @@ struct ContentView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView(viewModel: viewModel)
         }
+        .sheet(isPresented: $showPhotoPicker) {
+            PhotoPicker { images in
+                showPhotoPicker = false
+                for image in images { viewModel.addImage(image) }
+            }
+            .ignoresSafeArea()
+        }
     }
 }
 
@@ -413,6 +429,16 @@ struct SettingsView: View {
                     Button("Refresh from /healthz") {
                         Task { await viewModel.refreshHealth() }
                     }
+                }
+
+                Section(header: Text("Testing")) {
+                    Button("Load 12 sample frames") {
+                        viewModel.loadSampleFrames()
+                        dismiss()
+                    }
+                    Text("Generates synthetic frames so you can exercise the upload to reconstruct flow without a camera (e.g. in the Simulator).")
+                        .font(.footnote)
+                        .foregroundColor(.secondary)
                 }
             }
             .navigationTitle("Scanner Settings")
