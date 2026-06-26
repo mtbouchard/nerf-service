@@ -376,6 +376,36 @@ def viewer(url: str):
             errorEl.style.display = "block";
         }
 
+        // Frame the camera on the splat. Splat exports (nerfstudio, etc.) put the
+        // model at an arbitrary origin/scale and sprinkle stray "floater" splats far
+        // from the subject, so a fixed camera usually lands off-screen. We derive a
+        // robust center (per-axis median) and radius (85th-percentile distance, which
+        // ignores the floaters) and pull the camera back along -Z to fit it.
+        function frameCamera(scene, camera, controls) {
+            const obj = scene.objects && scene.objects[0];
+            const positions = obj && obj.data && obj.data.positions;
+            if (!positions || positions.length < 3) return;
+
+            const n = positions.length / 3;
+            const xs = new Float64Array(n), ys = new Float64Array(n), zs = new Float64Array(n);
+            for (let i = 0, j = 0; i < positions.length; i += 3, j++) {
+                xs[j] = positions[i]; ys[j] = positions[i + 1]; zs[j] = positions[i + 2];
+            }
+            const median = (arr) => { const s = Float64Array.from(arr).sort(); return s[s.length >> 1]; };
+            const cx = median(xs), cy = median(ys), cz = median(zs);
+
+            const dists = new Float64Array(n);
+            for (let j = 0; j < n; j++) {
+                dists[j] = Math.hypot(xs[j] - cx, ys[j] - cy, zs[j] - cz);
+            }
+            const sorted = Float64Array.from(dists).sort();
+            const radius = sorted[Math.min(sorted.length - 1, Math.floor(0.85 * sorted.length))] || 1;
+
+            const distance = radius * 2.0;
+            camera.position = new SPLAT.Vector3(cx, cy, cz - distance);
+            controls.setCameraTarget(new SPLAT.Vector3(cx, cy, cz));
+        }
+
         async function main() {
             const urlParams = new URLSearchParams(window.location.search);
             const plyUrl = urlParams.get('url');
@@ -390,10 +420,6 @@ def viewer(url: str):
                 const scene = new SPLAT.Scene();
                 const camera = new SPLAT.Camera();
                 const controls = new SPLAT.OrbitControls(camera, canvas);
-
-                // Set default camera positioning for splats
-                camera.position.z = -3;
-                camera.position.y = 0.5;
 
                 progressEl.textContent = "Fetching 3D Splat...";
                 
@@ -429,6 +455,8 @@ def viewer(url: str):
                     const p = Math.round(progress * 100);
                     progressEl.textContent = `Building Splats... ${p}%`;
                 });
+
+                frameCamera(scene, camera, controls);
 
                 loader.style.opacity = "0";
                 setTimeout(() => {
