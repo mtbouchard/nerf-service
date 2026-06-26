@@ -1,66 +1,88 @@
-# SplatCapture iOS SwiftUI App
+# SplatCapture iOS
 
-This directory contains the Swift source files for **SplatCapture**, a SwiftUI companion app that turns your iPhone into a real-time, interactive 3D Gaussian Splatting scan tool.
+SplatCapture is a SwiftUI companion app that turns an iPhone into an interactive 3D
+Gaussian Splatting scanner. It captures overlapping photos, uploads them to the
+nerf-service FastAPI backend, triggers GPU reconstruction (RunPod), and previews the
+finished scene in-app with a WebGL viewer.
 
-It connects directly to your deployed FastAPI backend (e.g. `https://nerf.mattbouchard.com`) to upload frames, trigger reconstruction on the GPU (RunPod), and preview the completed interactive 3D scene directly inside the app using WebGL.
-
----
-
-## 📂 Source Files Included
-
-1. **`CameraService.swift`**: Wraps `AVFoundation` to handle permission checks, camera feed setup (`AVCaptureSession`), high-quality photo capture, and haptic feedback.
-2. **`MainViewModel.swift`**: State management & Networking engine. Handles staged photo indexing, parallel multi-part image uploads with progress reporting, triggering the reconstruction job (`POST /nerfify`), and long-polling the job status (`GET /jobs/{id}`).
-3. **`WebViewer.swift`**: A SwiftUI `UIViewRepresentable` wrapping `WKWebView` to display the immersive 3D viewer.
-4. **`ContentView.swift`**: The main user interface. Features a sleek, dark-themed viewfinder with guidelines, a slide-up photo review and outlier culling grid, upload progress indicators, and the final 3D interactive viewer with a native Share/Export sheet.
+It talks to the deployed API (default `https://nerf.mattbouchard.com`) using the
+asynchronous submit -> poll -> download contract: `POST /upload`, `POST /nerfify` (202),
+`GET /jobs/{id}`, `GET /jobs/{id}/result`, and `/viewer?url=...`.
 
 ---
 
-## 🛠️ How to Set Up in Xcode
+## Source files
 
-Follow these steps to compile and run the app on your physical iPhone:
-
-### 1. Create a New Xcode Project
-- Open Xcode and choose **File > New > Project...**
-- Select **iOS > App** and click **Next**.
-- Project Name: `SplatCapture`
-- Interface: **SwiftUI**
-- Language: **Swift**
-- Click **Next** and save the project to your local drive.
-
-### 2. Add the Code Files
-- Copy the four `.swift` files from this directory (`CameraService.swift`, `MainViewModel.swift`, `WebViewer.swift`, and `ContentView.swift`) and add them into your Xcode project navigator.
-- Replace the default template `ContentView.swift` with the custom `ContentView.swift` provided here.
-
-### 3. Configure Camera Permissions (`Info.plist`)
-In iOS, you **must** request explicit user permission before starting the camera.
-- In your Xcode project settings, navigate to the **Info** tab of your app target.
-- Add a new row to the **Custom iOS Target Properties**:
-  - Key: `Privacy - Camera Usage Description`
-  - Value: `SplatCapture requires access to your camera to capture overlapping photos for 3D Gaussian Splatting reconstruction.`
-
-### 4. Configure App Transport Security (Optional)
-If you want to test the app locally using your Mac's development server (e.g., `http://192.168.x.x:8000`), you need to allow local HTTP requests:
-- In your project target's **Info** tab, add a new row:
-  - Key: `App Transport Security Settings`
-  - Under it, add: `Allow Arbitrary Loads` -> `YES`
-- *Note: This is not needed for your production Render URL (`https://nerf.mattbouchard.com`), which uses HTTPS by default.*
-
-### 5. Run on a Physical Device
-- Connect your iPhone to your Mac via USB.
-- Select your iPhone as the target device in Xcode's top bar.
-- Choose your developer team under **Signing & Capabilities** to sign the app.
-- Hit **Run (⌘R)**!
+| File | Responsibility |
+|------|----------------|
+| `SplatCaptureApp.swift` | `@main` app entry point. |
+| `CameraService.swift` | `AVCaptureSession` setup, permission handling, high-resolution photo capture (via `maxPhotoDimensions`), haptics. Publishes each capture through a Combine `PassthroughSubject`. |
+| `MainViewModel.swift` | State + networking: ordered parallel uploads, `/nerfify`, job polling, viewer URL construction. Persists the server URL across launches. |
+| `WebViewer.swift` | `UIViewRepresentable` wrapping `WKWebView` for the 3D viewer. |
+| `ContentView.swift` | Dark-themed viewfinder, staged-photo review/cull grid, progress HUD, 3D viewer, and share sheet. |
 
 ---
 
-## 📸 How to Perform a Scan
+## Build and run
 
-1. **Aim & Target**: Position an object in the center of the dashed guidelines.
-2. **Collect Views**: Move slowly around the object, capturing **20 to 40 overlapping photos** from multiple angles. Try to capture a full orbit (e.g. spiral slightly up and down) for optimal COLMAP camera-pose calculation.
-3. **Review & Cull**: Tap the bottom-left thumbnail to open the Staged Photos grid. Remove any blurry or out-of-focus photos using the red button.
-4. **Select Backend**: Open **Settings (Gear Icon)** to input your server URL and switch between processing strategies:
-   - **Local Pipeline** (CPU-based testing)
-   - **RunPod GPU** (End-to-end full resolution training)
-   - **World Labs** (Marble multimodal world generator)
-5. **Reconstruct**: Tap **Reconstruct Scan**! The app will upload the images in parallel, poll the server status dynamically, and open the interactive 3D WebGL viewer as soon as the reconstruction is ready.
-6. **Share**: Use the native iOS Share Sheet button at the top-right to copy the link or share the raw 3D model with recruiters, colleagues, or friends!
+The project is generated from `project.yml` with [XcodeGen](https://github.com/yonaskolb/XcodeGen),
+so the `.xcodeproj` is reproducible and not checked in.
+
+### 1. Install XcodeGen (one time)
+
+```bash
+brew install xcodegen
+```
+
+(Requires full **Xcode** from the App Store — Command Line Tools alone cannot build an iOS app.)
+
+### 2. Generate the project
+
+```bash
+cd nerf-service/SplatCapture-iOS
+xcodegen
+open SplatCapture.xcodeproj
+```
+
+`xcodegen` reads `project.yml` and writes `SplatCapture.xcodeproj`. Re-run it whenever you
+add/remove source files or change build settings. Regenerate any time after pulling.
+
+### 3. Configure signing and run
+
+- In Xcode, select the **SplatCapture** target > **Signing & Capabilities** and choose your
+  development team.
+- Connect a physical iPhone (the camera does not work in the Simulator), select it as the run
+  destination, and press **Run (Cmd-R)**.
+
+### What `project.yml` already configures
+
+- iOS 17 deployment target, portrait orientation, bundle id `com.mattbouchard.splatcapture`.
+- `NSCameraUsageDescription` (the camera permission prompt) — no manual Info.plist editing needed.
+- `NSAppTransportSecurity > NSAllowsLocalNetworking` so you can test against a Mac dev server over
+  HTTP on your LAN (e.g. `http://192.168.x.x:8000`). Production over HTTPS is unaffected.
+
+---
+
+## Performing a scan
+
+1. **Aim**: center the subject in the dashed guideline.
+2. **Capture**: move slowly around the subject, taking **20-40 overlapping photos** from multiple
+   angles (a full orbit, spiraling slightly up and down, gives COLMAP the best pose coverage).
+3. **Review & cull**: tap the bottom-left thumbnail to open the staged-photos grid and remove blurry
+   frames.
+4. **Endpoint**: open **Settings (gear)** to set the server URL. The active compute backend is
+   decided server-side (`NERF_BACKEND`); tap **Refresh from /healthz** to see which is running.
+5. **Reconstruct**: tap **Reconstruct Scan**. The app uploads in parallel (preserving capture order),
+   polls job status, and opens the interactive 3D viewer when the result is ready.
+6. **Share**: use the share button to send the result link.
+
+---
+
+## Notes
+
+- A minimum of 3 frames is required; the app caps staging at 80.
+- The in-app 3D preview loads `/viewer?url=<result>`, which fetches the `.ply` from object storage.
+  If the viewer is blank in production, confirm the R2 bucket allows CORS from
+  `nerf.mattbouchard.com`.
+- World Labs mode (`result_format == "world"`) opens the Marble world URL directly instead of the
+  WebGL `.ply` viewer.

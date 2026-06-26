@@ -7,3 +7,10 @@ venv/
 data/
 client/scene.ply
 .DS_Store
+
+# iOS / Xcode (SplatCapture-iOS) — project + Info.plist are generated from project.yml via XcodeGen
+SplatCapture-iOS/*.xcodeproj
+SplatCapture-iOS/*.xcworkspace
+SplatCapture-iOS/Info.plist
+SplatCapture-iOS/DerivedData/
+SplatCapture-iOS/build/

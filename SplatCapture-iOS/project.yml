@@ -1,0 +1,39 @@
+name: SplatCapture
+options:
+  bundleIdPrefix: com.mattbouchard
+  deploymentTarget:
+    iOS: "17.0"
+  createIntermediateGroups: true
+
+targets:
+  SplatCapture:
+    type: application
+    platform: iOS
+    sources:
+      - path: .
+        excludes:
+          - "*.md"
+          - "project.yml"
+          - "*.xcodeproj"
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.mattbouchard.splatcapture
+        MARKETING_VERSION: "1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        # We supply an explicit Info.plist below, so disable the auto-generated one.
+        GENERATE_INFOPLIST_FILE: NO
+        TARGETED_DEVICE_FAMILY: "1,2"
+        SWIFT_VERSION: "5.0"
+    info:
+      path: Info.plist
+      properties:
+        CFBundleDisplayName: SplatCapture
+        UILaunchScreen: {}
+        UISupportedInterfaceOrientations:
+          - UIInterfaceOrientationPortrait
+        # Camera permission prompt copy (required to start AVCaptureSession).
+        NSCameraUsageDescription: "SplatCapture needs camera access to capture overlapping photos for 3D Gaussian Splatting reconstruction."
+        # Allow plain-HTTP requests to a Mac dev server on the LAN (e.g. http://192.168.x.x:8000).
+        # Production (https://nerf.mattbouchard.com) is HTTPS and unaffected; arbitrary loads stay disabled.
+        NSAppTransportSecurity:
+          NSAllowsLocalNetworking: true

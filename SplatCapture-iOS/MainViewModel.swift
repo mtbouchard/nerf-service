@@ -17,7 +17,13 @@ enum JobState: String {
 }
 
 class MainViewModel: ObservableObject {
-    @Published var serverURL: String = "https://nerf.mattbouchard.com"
+    private static let serverURLKey = "splatcapture.serverURL"
+    private static let defaultServerURL = "https://nerf.mattbouchard.com"
+
+    // Persisted across launches so the endpoint survives relaunch.
+    @Published var serverURL: String {
+        didSet { UserDefaults.standard.set(serverURL, forKey: Self.serverURLKey) }
+    }
     // Informational only — the server's NERF_BACKEND env var selects the compute path.
     // Check GET /healthz to see which backend is actually running.
     @Published var backend: String = "runpod"
@@ -33,7 +39,12 @@ class MainViewModel: ObservableObject {
     
     private var cancellables = Set<AnyCancellable>()
     private var timer: Timer? = nil
-    
+
+    init() {
+        self.serverURL = UserDefaults.standard.string(forKey: Self.serverURLKey)
+            ?? Self.defaultServerURL
+    }
+
     func reset() {
         stagedImages.removeAll()
         isProcessing = false
@@ -131,8 +142,9 @@ class MainViewModel: ObservableObject {
             for try await pair in group {
                 indexedIds.append(pair)
                 completedCount += 1.0
+                let progress = completedCount / totalCount
                 await MainActor.run {
-                    self.uploadProgress = completedCount / totalCount
+                    self.uploadProgress = progress
                 }
             }
             return indexedIds.sorted { $0.0 < $1.0 }.map(\.1)
@@ -228,7 +240,7 @@ class MainViewModel: ObservableObject {
                 throw URLError(.badURL)
             }
 
-            let (responseData, response) = try await URLSession.shared.data(for: url)
+            let (responseData, response) = try await URLSession.shared.data(from: url)
             guard let httpResponse = response as? HTTPURLResponse else {
                 try await Task.sleep(nanoseconds: 5_000_000_000)
                 continue

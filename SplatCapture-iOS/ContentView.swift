@@ -301,10 +301,8 @@ struct ContentView: View {
                 }
             }
         }
-        .onChange(of: cameraService.capturedImage) { _, newImage in
-            if let image = newImage {
-                viewModel.addImage(image)
-            }
+        .onReceive(cameraService.photoCaptured) { image in
+            viewModel.addImage(image)
         }
         .task {
             await viewModel.refreshHealth()

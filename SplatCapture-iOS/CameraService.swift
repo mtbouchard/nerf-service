@@ -1,12 +1,16 @@
 import Foundation
 import AVFoundation
+import Combine
 import UIKit
 
 class CameraService: NSObject, ObservableObject {
     @Published var session = AVCaptureSession()
     @Published var isPermissionGranted = false
-    @Published var capturedImage: UIImage?
     @Published var isSessionRunning = false
+
+    /// Emits one event per successfully captured photo. Using a subject (rather than a
+    /// single @Published value) guarantees rapid shutter taps are not coalesced/dropped.
+    let photoCaptured = PassthroughSubject<UIImage, Never>()
     
     private let photoOutput = AVCapturePhotoOutput()
     private let sessionQueue = DispatchQueue(label: "com.splatcapture.sessionQueue")
@@ -64,7 +68,11 @@ class CameraService: NSObject, ObservableObject {
             
             if self.session.canAddOutput(self.photoOutput) {
                 self.session.addOutput(self.photoOutput)
-                self.photoOutput.isHighResolutionCaptureEnabled = true
+                // maxPhotoDimensions replaces the deprecated isHighResolutionCaptureEnabled (iOS 16+).
+                // Use the largest dimensions the active format advertises.
+                if let maxDimensions = videoDevice.activeFormat.supportedMaxPhotoDimensions.last {
+                    self.photoOutput.maxPhotoDimensions = maxDimensions
+                }
             } else {
                 print("Could not add photo output to the session")
                 self.session.commitConfiguration()
@@ -102,7 +110,9 @@ class CameraService: NSObject, ObservableObject {
         hapticGenerator.prepare()
         sessionQueue.async {
             let settings = AVCapturePhotoSettings()
-            settings.isHighResolutionPhotoEnabled = true
+            // Mirror the output's configured max dimensions
+            // (replaces the deprecated isHighResolutionPhotoEnabled).
+            settings.maxPhotoDimensions = self.photoOutput.maxPhotoDimensions
             
             // Enable flash if supported
             if self.photoOutput.supportedFlashModes.contains(.auto) {
@@ -130,7 +140,7 @@ extension CameraService: AVCapturePhotoCaptureDelegate {
             // Trigger feedback on successful capture
             DispatchQueue.main.async {
                 self.hapticGenerator.impactOccurred()
-                self.capturedImage = image
+                self.photoCaptured.send(image)
             }
         }
     }
