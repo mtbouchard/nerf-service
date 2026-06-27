@@ -26,6 +26,13 @@ RUNPOD_ENDPOINT_ID = os.environ.get("RUNPOD_ENDPOINT_ID")
 RESULT_FORMAT = os.environ.get("RESULT_FORMAT", "ply")
 HTTP_TIMEOUT = 30.0
 
+# Per-job execution timeout (ms) sent to RunPod as `policy.executionTimeout`. RunPod's default
+# is 600000 (10 min), which a full-resolution COLMAP + splatfacto run can exceed. We bump it so
+# larger / higher-res captures finish instead of being killed mid-train. `ttl` must cover queue
+# + execution time. Both override the endpoint defaults for this job only.
+RUNPOD_EXECUTION_TIMEOUT_MS = int(os.environ.get("RUNPOD_EXECUTION_TIMEOUT_MS", "1800000"))  # 30 min
+RUNPOD_TTL_MS = int(os.environ.get("RUNPOD_TTL_MS", "3600000"))  # 1 hour
+
 # RunPod serverless states -> our four-state model (string values of JobStatus).
 _STATE_MAP = {
     "IN_QUEUE": "pending",
@@ -64,7 +71,11 @@ def submit(job_id: str, image_keys: list[str]) -> str:
             "images": image_urls,
             "result_put_url": result_put_url,
             "result_format": RESULT_FORMAT,
-        }
+        },
+        "policy": {
+            "executionTimeout": RUNPOD_EXECUTION_TIMEOUT_MS,
+            "ttl": RUNPOD_TTL_MS,
+        },
     }
     resp = httpx.post(
         f"{RUNPOD_BASE}/{RUNPOD_ENDPOINT_ID}/run",

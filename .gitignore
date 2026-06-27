@@ -14,3 +14,9 @@ SplatCapture-iOS/*.xcworkspace
 SplatCapture-iOS/Info.plist
 SplatCapture-iOS/DerivedData/
 SplatCapture-iOS/build/
+
+# Raw LLFF datasets are large (~290MB) — keep them local; bundle only a curated sample set.
+SplatCapture-iOS/nerf_llff_data/
+
+# Real photo captures dropped in for reconstruction — local only, never commit.
+captures/

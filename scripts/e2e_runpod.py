@@ -18,6 +18,7 @@ from __future__ import annotations
 import argparse
 import json
 import mimetypes
+import ssl
 import sys
 import time
 import uuid
@@ -25,6 +26,9 @@ import urllib.error
 import urllib.parse
 import urllib.request
 from pathlib import Path
+
+# Disable SSL verification for ease of use across different local Python installations
+ssl_context = ssl._create_unverified_context()
 
 
 def _post_multipart(url: str, field: str, filename: str, data: bytes, content_type: str) -> dict:
@@ -38,7 +42,7 @@ def _post_multipart(url: str, field: str, filename: str, data: bytes, content_ty
     ])
     req = urllib.request.Request(url, data=body, method="POST")
     req.add_header("Content-Type", f"multipart/form-data; boundary={boundary}")
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=120, context=ssl_context) as resp:
         return json.loads(resp.read())
 
 
@@ -47,12 +51,12 @@ def _post_json(url: str, payload: dict) -> dict:
         url, data=json.dumps(payload).encode(), method="POST",
         headers={"Content-Type": "application/json"},
     )
-    with urllib.request.urlopen(req, timeout=60) as resp:
+    with urllib.request.urlopen(req, timeout=60, context=ssl_context) as resp:
         return json.loads(resp.read())
 
 
 def _get_json(url: str) -> dict:
-    with urllib.request.urlopen(url, timeout=60) as resp:
+    with urllib.request.urlopen(url, timeout=60, context=ssl_context) as resp:
         return json.loads(resp.read())
 
 
@@ -76,16 +80,55 @@ def main() -> int:
     if health.get("status") != "ok":
         print("[warn] backend not fully healthy; continuing anyway")
 
-    frame_paths = sorted(Path(args.frames).glob(args.frames_glob))[: args.max_frames]
-    if len(frame_paths) < 3:
-        print(f"[error] need >=3 frames, found {len(frame_paths)} in {args.frames}")
+    # Find all matching files
+    glob_pattern = args.frames_glob
+    if glob_pattern == "*.jpg":
+        # Broaden default to find common extensions case-insensitively
+        glob_pattern = "*"
+    
+    all_files = sorted([
+        p for p in Path(args.frames).glob(glob_pattern)
+        if p.suffix.lower() in (".jpg", ".jpeg", ".png")
+    ])
+
+    if len(all_files) < 3:
+        print(f"[error] need >=3 frames, found {len(all_files)} matching files in {args.frames}")
         return 2
-    print(f"[upload] {len(frame_paths)} frames from {args.frames}")
+
+    # Evenly sample (stride) across the files to cover the entire orbit/capture range
+    if len(all_files) > args.max_frames:
+        indices = [int(i * (len(all_files) - 1) / (args.max_frames - 1)) for i in range(args.max_frames)]
+        indices = sorted(list(set(indices)))
+        frame_paths = [all_files[idx] for idx in indices]
+        print(f"[stride] Sampled {len(frame_paths)} frames out of {len(all_files)} total files (evenly spaced)")
+    else:
+        frame_paths = all_files
+        print(f"[upload] {len(frame_paths)} frames from {args.frames}")
 
     image_ids: list[str] = []
     for i, path in enumerate(frame_paths, 1):
-        ctype = mimetypes.guess_type(path.name)[0] or "image/jpeg"
-        out = _post_multipart(f"{api}/upload", "file", path.name, path.read_bytes(), ctype)
+        # Convert PNG on the fly to JPEG if necessary (FastAPI expects JPEG)
+        if path.suffix.lower() == ".png":
+            try:
+                from PIL import Image
+                import io
+                img = Image.open(path)
+                if img.mode in ("RGBA", "P"):
+                    img = img.convert("RGB")
+                buf = io.BytesIO()
+                img.save(buf, format="JPEG", quality=90)
+                file_bytes = buf.getvalue()
+                ctype = "image/jpeg"
+                filename = path.stem + ".jpg"
+            except ImportError:
+                print("[error] PIL (Pillow) is required to convert PNG to JPEG. Install with: pip install pillow")
+                return 4
+        else:
+            file_bytes = path.read_bytes()
+            ctype = mimetypes.guess_type(path.name)[0] or "image/jpeg"
+            filename = path.name
+
+        out = _post_multipart(f"{api}/upload", "file", filename, file_bytes, ctype)
         image_ids.append(out["id"])
         print(f"  [{i:>2}/{len(frame_paths)}] {path.name} -> {out['id']}")
 
