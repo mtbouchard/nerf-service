@@ -75,3 +75,31 @@ def presign_put(key: str, content_type: str = "application/octet-stream") -> str
         Params={"Bucket": S3_BUCKET, "Key": key, "ContentType": content_type},
         ExpiresIn=PRESIGN_EXPIRY_SECONDS,
     )
+
+
+def put_cors(allowed_origins: list[str] | None = None) -> None:
+    """Set a GET/HEAD CORS rule on the bucket so browser clients (the WebGL /viewer) can
+    fetch result .ply files cross-origin after the presigned-URL redirect. Idempotent."""
+    origins = allowed_origins or ["*"]
+    _client().put_bucket_cors(
+        Bucket=S3_BUCKET,
+        CORSConfiguration={
+            "CORSRules": [
+                {
+                    "AllowedOrigins": origins,
+                    "AllowedMethods": ["GET", "HEAD"],
+                    "AllowedHeaders": ["*"],
+                    "ExposeHeaders": ["Content-Length", "Content-Type"],
+                    "MaxAgeSeconds": 3600,
+                }
+            ]
+        },
+    )
+
+
+def get_cors() -> list:
+    """Return the bucket's current CORS rules (empty list if none / not set)."""
+    try:
+        return _client().get_bucket_cors(Bucket=S3_BUCKET).get("CORSRules", [])
+    except Exception:
+        return []

@@ -432,11 +432,11 @@ struct SettingsView: View {
                 }
 
                 Section(header: Text("Testing")) {
-                    Button("Load 12 sample frames") {
+                    Button("Load fern sample frames") {
                         viewModel.loadSampleFrames()
                         dismiss()
                     }
-                    Text("Generates synthetic frames so you can exercise the upload to reconstruct flow without a camera (e.g. in the Simulator).")
+                    Text("Stages the bundled LLFF fern photos so you can run a real reconstruction without a camera (e.g. in the Simulator). Falls back to synthetic frames if the bundle has none.")
                         .font(.footnote)
                         .foregroundColor(.secondary)
                 }

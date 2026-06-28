@@ -20,3 +20,11 @@ SplatCapture-iOS/nerf_llff_data/
 
 # Real photo captures dropped in for reconstruction — local only, never commit.
 captures/
+
+# Local splat pipeline scratch + results (keep directory skeleton via .gitkeep).
+local-splat/inputs/*
+!local-splat/inputs/.gitkeep
+local-splat/outputs/*
+!local-splat/outputs/.gitkeep
+local-splat/work/*
+!local-splat/work/.gitkeep

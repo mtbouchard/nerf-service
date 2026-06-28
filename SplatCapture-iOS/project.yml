@@ -15,6 +15,7 @@ targets:
           - "*.md"
           - "project.yml"
           - "*.xcodeproj"
+          - "nerf_llff_data/**" # raw 290MB LLFF dataset — never bundle this
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.mattbouchard.splatcapture

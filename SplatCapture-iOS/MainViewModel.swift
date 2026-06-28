@@ -65,16 +65,35 @@ class MainViewModel: ObservableObject {
         }
     }
 
-    /// Replace the staging area with synthetic frames so the full upload -> reconstruct flow
-    /// can be exercised without a camera (e.g. in the Simulator). These are for testing the
-    /// pipeline/UI, not for producing a high-quality reconstruction.
+    /// Replace the staging area with sample frames so the full upload -> reconstruct flow
+    /// can be exercised without a camera (e.g. in the Simulator).
+    ///
+    /// Prefers the bundled real LLFF "fern" frames (which reconstruct cleanly on the GPU
+    /// backend); falls back to synthetic frames if the bundle has none. The synthetic frames
+    /// exercise the pipeline/UI but won't survive COLMAP feature matching.
     func loadSampleFrames(count: Int = 12) {
         stagedImages.removeAll()
+
+        let fernFrames = Self.bundledFernFrames()
+        if !fernFrames.isEmpty {
+            for image in fernFrames { addImage(image) }
+            return
+        }
+
         for i in 0..<count {
             if let image = Self.makeSampleFrame(index: i, total: count) {
                 addImage(image)
             }
         }
+    }
+
+    /// Loads the bundled fern sample JPEGs (named `sample_fern_NN.jpg`), in order.
+    private static func bundledFernFrames() -> [UIImage] {
+        let urls = Bundle.main.urls(forResourcesWithExtension: "jpg", subdirectory: nil) ?? []
+        return urls
+            .filter { $0.lastPathComponent.hasPrefix("sample_fern_") }
+            .sorted { $0.lastPathComponent < $1.lastPathComponent }
+            .compactMap { UIImage(contentsOfFile: $0.path) }
     }
 
     private static func makeSampleFrame(index: Int, total: Int) -> UIImage? {
